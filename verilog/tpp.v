@@ -204,8 +204,16 @@ module tpp
    localparam HEADER_2      = 1;
    localparam INS           = 2;
    localparam INS_LOAD_REG_HOPMEM = 3;
-   localparam INS_STORE_HOPMEM_REG = 4;
-   localparam IN_PACKET     = 5;
+   localparam INS_LOAD_SMEM_HOPMEM = 4;
+   localparam INS_STORE_HOPMEM_REG = 5;
+   localparam INS_STORE_HOPMEM_SMEM = 6;
+   localparam INS_STOREC_HOPMEM_HOPMEM_REG_0 = 7;
+   localparam INS_STOREC_HOPMEM_HOPMEM_REG_1 = 8;
+   localparam INS_STOREC_HOPMEM_HOPMEM_REG_2 = 9;
+   localparam INS_STOREC_HOPMEM_HOPMEM_SMEM_0 = 11;
+   localparam INS_STOREC_HOPMEM_HOPMEM_SMEM_1 = 12;
+   localparam INS_STOREC_HOPMEM_HOPMEM_SMEM_2 = 13;
+   localparam IN_PACKET     = 14;
 
    localparam LOAD_REG_HOPMEM = 0;
    localparam LOAD_SMEM_HOPMEM = 1;
@@ -223,6 +231,11 @@ module tpp
    reg in_fifo_rd_en;
 
    reg [7:0] tpp_reg_addr, tpp_reg_addr_next;
+
+   reg [3:0] tpp_hopmem_addr_0, tpp_hopmem_addr_0_next;
+   reg [3:0] tpp_hopmem_addr_1, tpp_hopmem_addr_1_next;
+
+   reg [63:0] tpp_hopmem_0, tpp_hopmem_0_next, tpp_hopmem_1, tpp_hopmem_1_next;
 
    reg [3:0] state, state_next;
 
@@ -244,6 +257,13 @@ module tpp
          .rd_en                          (in_fifo_rd_en),
          .reset                          (~axi_resetn),
          .clk                            (axi_aclk));
+
+   reg ram_wr_en;
+   reg [9:0] ram_addr, ram_addr_reg, ram_addr_next;
+   reg [63:0] ram_din;
+   wire [63:0] ram_dout;
+
+   tpp_ram ram(axi_aclk, ~axi_resetn, ram_wr_en, ram_addr, ram_din, ram_dout);
 
    // ------------- Logic ----------------
 
@@ -267,6 +287,16 @@ module tpp
       tpp_reg5_next = tpp_reg5;
       tpp_reg6_next = tpp_reg6;
       tpp_reg7_next = tpp_reg7;
+
+      ram_wr_en = 0;
+      ram_addr = ram_addr_reg;
+      ram_din = 0;
+      ram_addr_next = ram_addr_reg;
+
+      tpp_hopmem_addr_0_next = tpp_hopmem_addr_0;
+      tpp_hopmem_addr_1_next = tpp_hopmem_addr_1;
+      tpp_hopmem_0_next = tpp_hopmem_0;
+      tpp_hopmem_1_next = tpp_hopmem_1;
 
       case(state)
 	MODULE_HEADER: begin
@@ -313,7 +343,9 @@ module tpp
                        end
 
                        LOAD_SMEM_HOPMEM: begin
-                          state_next = IN_PACKET;
+                          ram_addr = m_axis_tdata[17+TPP_STAGE*32:8+TPP_STAGE*32];
+                          ram_addr_next = m_axis_tdata[17+TPP_STAGE*32:8+TPP_STAGE*32];
+                          state_next = INS_LOAD_SMEM_HOPMEM;
                        end
 
                        STORE_HOPMEM_REG: begin
@@ -322,15 +354,22 @@ module tpp
                        end
 
                        STORE_HOPMEM_SMEM: begin
-                          state_next = IN_PACKET;
+                          ram_addr_next = m_axis_tdata[17+TPP_STAGE*32:8+TPP_STAGE*32];
+                          state_next = INS_STORE_HOPMEM_SMEM;
                        end
 
                        STOREC_HOPMEM_HOPMEM_REG: begin
-                          state_next = IN_PACKET;
+                          tpp_reg_addr_next = m_axis_tdata[23+TPP_STAGE*32:16+TPP_STAGE*32];
+                          tpp_hopmem_addr_0_next = m_axis_tdata[11+TPP_STAGE*32:8+TPP_STAGE*32];
+                          tpp_hopmem_addr_1_next = m_axis_tdata[15+TPP_STAGE*32:12+TPP_STAGE*32];
+                          state_next = INS_STOREC_HOPMEM_HOPMEM_REG_0;
                        end
 
                        STOREC_HOPMEM_HOPMEM_SMEM: begin
-                          state_next = IN_PACKET;
+                          ram_addr_next = m_axis_tdata[25+TPP_STAGE*32:16+TPP_STAGE*32];
+                          tpp_hopmem_addr_0_next = m_axis_tdata[11+TPP_STAGE*32:8+TPP_STAGE*32];
+                          tpp_hopmem_addr_1_next = m_axis_tdata[15+TPP_STAGE*32:12+TPP_STAGE*32];
+                          state_next = INS_STOREC_HOPMEM_HOPMEM_SMEM_0;
                        end
 
                        default: begin
@@ -397,6 +436,22 @@ module tpp
            end
         end
 
+        INS_LOAD_SMEM_HOPMEM: begin
+           m_axis_tdata[63+64*TPP_STAGE:64*TPP_STAGE] = ram_dout;
+           if(~in_fifo_empty) begin
+              m_axis_tvalid = 1;
+              if(m_axis_tready) begin
+                 in_fifo_rd_en = 1;
+                 if(~m_axis_tlast) begin
+                    state_next = IN_PACKET;
+                 end
+                 else begin
+                    state_next = MODULE_HEADER;
+                 end
+              end
+           end
+        end
+
         INS_STORE_HOPMEM_REG: begin
            if(~in_fifo_empty) begin
               m_axis_tvalid = 1;
@@ -446,6 +501,246 @@ module tpp
            end
         end
 
+        INS_STORE_HOPMEM_SMEM: begin
+           if(~in_fifo_empty) begin
+              m_axis_tvalid = 1;
+              if(m_axis_tready) begin
+                 in_fifo_rd_en = 1;
+                 ram_din = m_axis_tdata[63+64*TPP_STAGE:64*TPP_STAGE];
+                 ram_wr_en = 1;
+                 if(~m_axis_tlast) begin
+                    state_next = IN_PACKET;
+                 end
+                 else begin
+                    state_next = MODULE_HEADER;
+                 end
+              end
+           end
+        end
+
+        INS_STOREC_HOPMEM_HOPMEM_REG_0: begin
+
+           case(tpp_hopmem_addr_0[1:0])
+             2'd0: begin
+                tpp_hopmem_0_next = m_axis_tdata[63:0];
+             end
+        
+             2'd1: begin
+                tpp_hopmem_0_next = m_axis_tdata[127:64];
+             end
+
+             2'd2: begin
+                tpp_hopmem_0_next = m_axis_tdata[191:128];
+             end
+
+             2'd3: begin
+                tpp_hopmem_0_next = m_axis_tdata[255:192];
+             end   
+           endcase
+
+           case(tpp_hopmem_addr_1[1:0])
+             2'd0: begin
+                tpp_hopmem_1_next = m_axis_tdata[63:0];
+             end
+        
+             2'd1: begin
+                tpp_hopmem_1_next = m_axis_tdata[127:64];
+             end
+
+             2'd2: begin
+                tpp_hopmem_1_next = m_axis_tdata[191:128];
+             end
+
+             2'd3: begin
+                tpp_hopmem_1_next = m_axis_tdata[255:192];
+             end   
+           endcase
+
+           if(~in_fifo_empty) begin
+              m_axis_tvalid = 1;
+
+              if(m_axis_tready) begin
+                 in_fifo_rd_en = 1;
+                 if(~m_axis_tlast) begin
+                    state_next = INS_STOREC_HOPMEM_HOPMEM_REG_1;
+                 end
+                 else begin
+                    state_next = INS_STOREC_HOPMEM_HOPMEM_REG_2;
+                 end
+              end
+           end
+        end
+
+        INS_STOREC_HOPMEM_HOPMEM_REG_1: begin
+           if(tpp_hopmem_0 == tpp_hopmem_1) begin
+              case(tpp_reg_addr[2:0])
+                 3'd0: begin
+                    tpp_reg0_next = tpp_hopmem_1;
+                 end
+
+                 3'd1: begin
+                    tpp_reg1_next = tpp_hopmem_1;
+                 end
+
+                 3'd2: begin
+                    tpp_reg2_next = tpp_hopmem_1;
+                 end
+
+                 3'd3: begin
+                    tpp_reg3_next = tpp_hopmem_1;
+                 end
+
+                 3'd4: begin
+                    tpp_reg4_next = tpp_hopmem_1;
+                 end
+
+                 3'd5: begin
+                    tpp_reg5_next = tpp_hopmem_1;
+                 end
+
+                 3'd6: begin
+                    tpp_reg6_next = tpp_hopmem_1;
+                 end
+
+                 3'd7: begin
+                    tpp_reg7_next = tpp_hopmem_1;
+                 end
+              endcase
+           end
+           if(~in_fifo_empty) begin
+              m_axis_tvalid = 1;
+              if(m_axis_tready) begin
+                 in_fifo_rd_en = 1;
+                 if(~m_axis_tlast) begin
+                    state_next = IN_PACKET;
+                 end
+                 else begin
+                    state_next = MODULE_HEADER;
+                 end
+              end
+           end
+        end
+
+        INS_STOREC_HOPMEM_HOPMEM_REG_2: begin
+           if(tpp_hopmem_0 == tpp_hopmem_1) begin
+              case(tpp_reg_addr[2:0])
+                 3'd0: begin
+                    tpp_reg0_next = tpp_hopmem_1;
+                 end
+
+                 3'd1: begin
+                    tpp_reg1_next = tpp_hopmem_1;
+                 end
+
+                 3'd2: begin
+                    tpp_reg2_next = tpp_hopmem_1;
+                 end
+
+                 3'd3: begin
+                    tpp_reg3_next = tpp_hopmem_1;
+                 end
+
+                 3'd4: begin
+                    tpp_reg4_next = tpp_hopmem_1;
+                 end
+
+                 3'd5: begin
+                    tpp_reg5_next = tpp_hopmem_1;
+                 end
+
+                 3'd6: begin
+                    tpp_reg6_next = tpp_hopmem_1;
+                 end
+
+                 3'd7: begin
+                    tpp_reg7_next = tpp_hopmem_1;
+                 end
+              endcase
+           end
+           state_next = MODULE_HEADER;
+        end
+
+        INS_STOREC_HOPMEM_HOPMEM_SMEM_0: begin
+
+           case(tpp_hopmem_addr_0[1:0])
+             2'd0: begin
+                tpp_hopmem_0_next = m_axis_tdata[63:0];
+             end
+        
+             2'd1: begin
+                tpp_hopmem_0_next = m_axis_tdata[127:64];
+             end
+
+             2'd2: begin
+                tpp_hopmem_0_next = m_axis_tdata[191:128];
+             end
+
+             2'd3: begin
+                tpp_hopmem_0_next = m_axis_tdata[255:192];
+             end   
+           endcase
+
+           case(tpp_hopmem_addr_1[1:0])
+             2'd0: begin
+                tpp_hopmem_1_next = m_axis_tdata[63:0];
+             end
+        
+             2'd1: begin
+                tpp_hopmem_1_next = m_axis_tdata[127:64];
+             end
+
+             2'd2: begin
+                tpp_hopmem_1_next = m_axis_tdata[191:128];
+             end
+
+             2'd3: begin
+                tpp_hopmem_1_next = m_axis_tdata[255:192];
+             end   
+           endcase
+
+           if(~in_fifo_empty) begin
+              m_axis_tvalid = 1;
+              if(m_axis_tready) begin
+                 in_fifo_rd_en = 1;
+                 if(~m_axis_tlast) begin
+                    state_next = INS_STOREC_HOPMEM_HOPMEM_SMEM_1;
+                 end
+                 else begin
+                    state_next = INS_STOREC_HOPMEM_HOPMEM_SMEM_2;
+                 end
+              end
+           end
+        end
+
+        INS_STOREC_HOPMEM_HOPMEM_SMEM_1: begin
+            if(tpp_hopmem_0 == tpp_hopmem_1) begin
+                ram_din = tpp_hopmem_1;
+                ram_wr_en = 1;
+            end
+
+           if(~in_fifo_empty) begin
+              m_axis_tvalid = 1;
+              if(m_axis_tready) begin
+                 in_fifo_rd_en = 1;
+                 if(~m_axis_tlast) begin
+                    state_next = IN_PACKET;
+                 end
+                 else begin
+                    state_next = MODULE_HEADER;
+                 end
+              end
+           end
+        end
+
+        INS_STOREC_HOPMEM_HOPMEM_SMEM_2: begin
+            if(tpp_hopmem_0 == tpp_hopmem_1) begin
+                ram_din = tpp_hopmem_1;
+                ram_wr_en = 1;
+            end
+
+            state_next = MODULE_HEADER;
+        end
+
 	IN_PACKET: begin
            if(~in_fifo_empty) begin
               m_axis_tvalid = 1;
@@ -464,10 +759,20 @@ module tpp
       if(~axi_resetn) begin
 	 state <= MODULE_HEADER;
          tpp_reg_addr <= 0;
+         ram_addr_reg <= 0;
+         tpp_hopmem_addr_0 <= 0;
+         tpp_hopmem_addr_1 <= 0;
+         tpp_hopmem_0 <= 0;
+         tpp_hopmem_1 <= 0;
       end
       else begin
 	 state <= state_next;
          tpp_reg_addr <= tpp_reg_addr_next;
+         ram_addr_reg <= ram_addr_next;
+         tpp_hopmem_addr_0 <= tpp_hopmem_addr_0_next;
+         tpp_hopmem_addr_1 <= tpp_hopmem_addr_1_next;
+         tpp_hopmem_0 <= tpp_hopmem_0_next;
+         tpp_hopmem_1 <= tpp_hopmem_1_next;
       end
    end
 

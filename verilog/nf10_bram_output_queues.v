@@ -152,6 +152,27 @@ module nf10_bram_output_queues
    wire [NUM_QUEUES-1:0] 	           m_axis_tready;
    wire [NUM_QUEUES-1:0] 	           tpp_s_axis_tready;
 
+   wire [C_M_AXIS_TUSER_WIDTH-1:0]             m_axis_tuser_tpp_0[NUM_QUEUES-1:0];
+   wire [C_M_AXIS_DATA_WIDTH-1:0]        m_axis_tdata_tpp_0[NUM_QUEUES-1:0];
+   wire [((C_M_AXIS_DATA_WIDTH/8))-1:0]  m_axis_tstrb_tpp_0[NUM_QUEUES-1:0];
+   wire [NUM_QUEUES-1:0] 	           m_axis_tlast_tpp_0;
+   wire [NUM_QUEUES-1:0] 	           m_axis_tvalid_tpp_0;
+   wire [NUM_QUEUES-1:0] 	           m_axis_tready_tpp_0;
+
+   wire [C_M_AXIS_TUSER_WIDTH-1:0]             m_axis_tuser_tpp_1[NUM_QUEUES-1:0];
+   wire [C_M_AXIS_DATA_WIDTH-1:0]        m_axis_tdata_tpp_1[NUM_QUEUES-1:0];
+   wire [((C_M_AXIS_DATA_WIDTH/8))-1:0]  m_axis_tstrb_tpp_1[NUM_QUEUES-1:0];
+   wire [NUM_QUEUES-1:0] 	           m_axis_tlast_tpp_1;
+   wire [NUM_QUEUES-1:0] 	           m_axis_tvalid_tpp_1;
+   wire [NUM_QUEUES-1:0] 	           m_axis_tready_tpp_1;
+
+   wire [C_M_AXIS_TUSER_WIDTH-1:0]             m_axis_tuser_tpp_2[NUM_QUEUES-1:0];
+   wire [C_M_AXIS_DATA_WIDTH-1:0]        m_axis_tdata_tpp_2[NUM_QUEUES-1:0];
+   wire [((C_M_AXIS_DATA_WIDTH/8))-1:0]  m_axis_tstrb_tpp_2[NUM_QUEUES-1:0];
+   wire [NUM_QUEUES-1:0] 	           m_axis_tlast_tpp_2;
+   wire [NUM_QUEUES-1:0] 	           m_axis_tvalid_tpp_2;
+   wire [NUM_QUEUES-1:0] 	           m_axis_tready_tpp_2;
+
    wire [NUM_QUEUES-1:0]               rd_en;
    reg [NUM_QUEUES-1:0]                wr_en;
 
@@ -180,6 +201,7 @@ module nf10_bram_output_queues
    reg [63:0] queue_util_next[NUM_QUEUES-1:0];
    reg [63:0] timer[NUM_QUEUES-1:0];
    wire [63:0] timer_max[NUM_QUEUES-1:0];
+   reg [63:0] timestamp;
 
 
    // ------------ Modules -------------
@@ -223,13 +245,89 @@ module nf10_bram_output_queues
          .clk                            (axi_aclk));
 
       tpp
-        #(.TPP_REG_WRITE_PERMISSION(8'b00000100),
-          .TPP_REG2_DEFAULT(64'd160000))
-      tpp_processor
+        #(.TPP_STAGE(0),
+          .TPP_REG_WRITE_PERMISSION(8'b11111000),
+          .TPP_REG3_DEFAULT(64'd160000))
+      tpp_processor_0
         (.tpp_reg0_in(queue_size[i]),
          .tpp_reg1_in(queue_util[i]),
-         .tpp_reg3_in(timer[i]),
-         .tpp_reg2_out(timer_max[i]),
+         .tpp_reg2_in(timestamp),
+         .tpp_reg3_out(timer_max[i]),
+
+         .axi_aclk(axi_aclk),
+         .axi_resetn(axi_resetn),
+
+         .m_axis_tdata(m_axis_tdata_tpp_0[i]),
+         .m_axis_tstrb(m_axis_tstrb_tpp_0[i]),
+         .m_axis_tuser(m_axis_tuser_tpp_0[i]),
+         .m_axis_tvalid(m_axis_tvalid_tpp_0[i]),
+         .m_axis_tready(m_axis_tready_tpp_0[i]),
+         .m_axis_tlast(m_axis_tlast_tpp_0[i]),
+
+         .s_axis_tdata(fifo_out_tdata[i]),
+         .s_axis_tstrb(fifo_out_tstrb[i]),
+         .s_axis_tuser(fifo_out_tuser[i]),
+         .s_axis_tvalid(~empty[i]),
+         .s_axis_tready(tpp_s_axis_tready[i]),
+         .s_axis_tlast(fifo_out_tlast[i]));
+
+      tpp
+        #(.TPP_STAGE(1),
+          .TPP_REG_WRITE_PERMISSION(8'b11111000))
+      tpp_processor_1
+        (.tpp_reg0_in(queue_size[i]),
+         .tpp_reg1_in(queue_util[i]),
+         .tpp_reg2_in(timestamp),
+
+         .axi_aclk(axi_aclk),
+         .axi_resetn(axi_resetn),
+
+         .m_axis_tdata(m_axis_tdata_tpp_1[i]),
+         .m_axis_tstrb(m_axis_tstrb_tpp_1[i]),
+         .m_axis_tuser(m_axis_tuser_tpp_1[i]),
+         .m_axis_tvalid(m_axis_tvalid_tpp_1[i]),
+         .m_axis_tready(m_axis_tready_tpp_1[i]),
+         .m_axis_tlast(m_axis_tlast_tpp_1[i]),
+
+         .s_axis_tdata(m_axis_tdata_tpp_0[i]),
+         .s_axis_tstrb(m_axis_tstrb_tpp_0[i]),
+         .s_axis_tuser(m_axis_tuser_tpp_0[i]),
+         .s_axis_tvalid(m_axis_tvalid_tpp_0[i]),
+         .s_axis_tready(m_axis_tready_tpp_0[i]),
+         .s_axis_tlast(m_axis_tlast_tpp_0[i]));
+
+      tpp
+        #(.TPP_STAGE(2),
+          .TPP_REG_WRITE_PERMISSION(8'b11111000))
+      tpp_processor_2
+        (.tpp_reg0_in(queue_size[i]),
+         .tpp_reg1_in(queue_util[i]),
+         .tpp_reg2_in(timestamp),
+
+         .axi_aclk(axi_aclk),
+         .axi_resetn(axi_resetn),
+
+         .m_axis_tdata(m_axis_tdata_tpp_2[i]),
+         .m_axis_tstrb(m_axis_tstrb_tpp_2[i]),
+         .m_axis_tuser(m_axis_tuser_tpp_2[i]),
+         .m_axis_tvalid(m_axis_tvalid_tpp_2[i]),
+         .m_axis_tready(m_axis_tready_tpp_2[i]),
+         .m_axis_tlast(m_axis_tlast_tpp_2[i]),
+
+         .s_axis_tdata(m_axis_tdata_tpp_1[i]),
+         .s_axis_tstrb(m_axis_tstrb_tpp_1[i]),
+         .s_axis_tuser(m_axis_tuser_tpp_1[i]),
+         .s_axis_tvalid(m_axis_tvalid_tpp_1[i]),
+         .s_axis_tready(m_axis_tready_tpp_1[i]),
+         .s_axis_tlast(m_axis_tlast_tpp_1[i]));
+
+      tpp
+        #(.TPP_STAGE(3),
+          .TPP_REG_WRITE_PERMISSION(8'b11111000))
+      tpp_processor_3
+        (.tpp_reg0_in(queue_size[i]),
+         .tpp_reg1_in(queue_util[i]),
+         .tpp_reg2_in(timestamp),
 
          .axi_aclk(axi_aclk),
          .axi_resetn(axi_resetn),
@@ -241,12 +339,12 @@ module nf10_bram_output_queues
          .m_axis_tready(m_axis_tready[i]),
          .m_axis_tlast(m_axis_tlast[i]),
 
-         .s_axis_tdata(fifo_out_tdata[i]),
-         .s_axis_tstrb(fifo_out_tstrb[i]),
-         .s_axis_tuser(fifo_out_tuser[i]),
-         .s_axis_tvalid(~empty[i]),
-         .s_axis_tready(tpp_s_axis_tready[i]),
-         .s_axis_tlast(fifo_out_tlast[i]));
+         .s_axis_tdata(m_axis_tdata_tpp_2[i]),
+         .s_axis_tstrb(m_axis_tstrb_tpp_2[i]),
+         .s_axis_tuser(m_axis_tuser_tpp_2[i]),
+         .s_axis_tvalid(m_axis_tvalid_tpp_2[i]),
+         .s_axis_tready(m_axis_tready_tpp_2[i]),
+         .s_axis_tlast(m_axis_tlast_tpp_2[i]));
 
    always @(metadata_state[i], rd_en[i], wr_en[i], fifo_out_tlast[i], timer[i], timer_max[i]) begin
         metadata_rd_en[i] = 1'b0;
@@ -375,11 +473,13 @@ module nf10_bram_output_queues
          state <= IDLE;
          cur_queue <= 0;
          first_word <= 0;
+         timestamp <= 0;
       end
       else begin
          state <= state_next;
          cur_queue <= cur_queue_next;
          first_word <= first_word_next;
+         timestamp <= timestamp + 1;
       end
 
       nearly_full <= nearly_full_fifo;
